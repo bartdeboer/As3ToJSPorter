@@ -22,6 +22,7 @@ class ClassStruct
 	public $accessors = array();
 	public $imports = array();
 	public $dependencies = array();
+  public $classInstantiations = array();
 	
 	public function getScopeAccessors() 
 	{
@@ -329,7 +330,9 @@ class As3Parser extends Struct
 				$memberStruct->parameters[$parameterStruct->name] = $parameterStruct;
 			}				
 
-			$this->parseVariables2($memberStruct);
+			$this->parseVariables($memberStruct);
+      
+      $classStruct->classInstantiations = array_merge($classStruct->classInstantiations, $this->findClassInstantiations($memberStruct));
 			
 			$memberStruct->localVariables = array_merge($memberStruct->parameters, $memberStruct->variables);	
 
@@ -337,10 +340,13 @@ class As3Parser extends Struct
 			$classStruct->functions[$memberStruct->name] = $memberStruct;
 		}	
 	
+    $classStruct->classInstantiations = array_unique($classStruct->classInstantiations);
 	}
 
 	
-	function parseVariables2($memberStruct)
+  
+  
+	function parseVariables($memberStruct)
 	{
 
 		$memberStruct->variables = array();			
@@ -368,51 +374,26 @@ class As3Parser extends Struct
 		}	
 	
 	}	
-	
-	
 
-	function parseVariables($memberStruct)
-	{
 
-		$memberStruct->variables = array();			
-		$regExpParts = array();
-		// array_push($regExpParts, '(?:[^=;,\s]+\s*=\s*([^;,()"\']+(\(((?:[^()]*|(?2))*)\))?)+)'); // somevar = object.object(object.function().bla()).length etc
-		array_push($regExpParts, '(?:[^=;,\s]+\s*=([^;,()"\']+(\(((?:[^()]*|(?2))*)\))?)+)'); // somevar = object.object(object.function().bla()).length etc
-		array_push($regExpParts, '(?:[^=;,\s]+\s*=\s*("((?:(?:[^"\\\\]|\\\\.)*|(?4))*)"))'); // somevar = "blah blah\" blah"
-		array_push($regExpParts, '(?:[^=;,\s]+\s*=\s*(\'((?:(?:[^\'\\\\]|\\\\.)*|(?6))*)\'))'); // somevar = 'blah blah\' blah'
-		// array_push($regExpParts, '(?:[^=;,\s]+\s*=\s*\.?[[:digit:]]+(?:\.[[:digit:]]+)?)'); // somevar = .5
-		array_push($regExpParts, '(?:[^=;,(){}]+\s*)'); // somevar
-
-		$regExp = '/var\s+((?:(?:\s*,\s*)?(?:' . implode('|', $regExpParts) . '))+)/'; // var expr, expr, expr
-		if (preg_match_all($regExp , $memberStruct->source, $varMatches)) 
+  function findClassInstantiations($memberStruct) {
+  
+    $instantiations = array();
+    
+    $regExp = '/(?<![[:alnum:]_$\.])new\s+([[:alpha:]_$][[:alnum:]_$]*)\s*(?=[\(])/';
+  
+  	if (preg_match_all($regExp , $memberStruct->source, $varMatches)) 
 		{ 
-			foreach ($varMatches[1] as $varMatch) 
-			{
-				$vars = specialsplit($varMatch);
-
-				foreach ($vars as $var) 
-				{
-					$varStruct = new VariableStruct();
-				
-					$varSplit = preg_split('/[:=]/', $var, 3);
-					$varStruct->name = trim($varSplit[0]);
-					$varStruct->type = trim($varSplit[1]);
-					$varStruct->value = array_key_exists(2, $varSplit) ? trim($varSplit[2]) : '' ;
-					
-					if (preg_match_all('/^Vector.<([^>]*)>$/', $varStruct->type, $vectorMatches)) 
-					{
-						$varStruct->type = '[]';
-						$varStruct->vectorType = $vectorMatches[1][0];
-						$varStruct->isArray = true;	
-					}
-					
-					$memberStruct->variables[$varStruct->name] = $varStruct;
-				}
-			}				
-		}	
-	
-	}
-
+			for ($i = 0, $size = sizeof($varMatches[1]); $i < $size; $i++)
+      {
+        $className = trim($varMatches[1][$i]);
+        $instantiations[] = $className;
+      }
+    }
+    
+    return $instantiations;
+  }
+  
 
 	public function handleInheritance() 
 	{
@@ -444,29 +425,39 @@ class As3Parser extends Struct
 			{
 				$class->dependencies[$class->extends->name] = $class->extends->name;
 			}
-			foreach ($class->imports as $importString) {
-				if (strpos($importString, '*') === false)
-				{
-					$className = substr(strrchr($importString, '.'), 1);
-					if (array_key_exists($className, $this->classes))
-					{
-						$class->dependencies[$className] = $className;
-					}
-				}
-				else
-				{
-					foreach ($this->packages as $package) 
-					{
-						if (preg_match('/' . $importString . '/', $package->name)) 
-						{
-							foreach ($package->classes as $importClass) 
-							{
-								$class->dependencies[$importClass->name] = $importClass->name;
-							}
-						}
-					}
-				}
-			}
+      
+      // foreach ($class->classInstantiations as $className) 
+      // {      
+        // if (array_key_exists($className, $this->classes) && $class->name != $className)
+        // {
+          // $class->dependencies[$className] = $className;
+        // }
+      // }
+      
+			// foreach ($class->imports as $importString) 
+      // {
+				// if (strpos($importString, '*') === false)
+				// {
+					// $className = substr(strrchr($importString, '.'), 1);
+					// if (array_key_exists($className, $this->classes))
+					// {
+						// $class->dependencies[$className] = $className;
+					// }
+				// }
+				// else
+				// {
+					// foreach ($this->packages as $package) 
+					// {
+						// if (preg_match('/' . $importString . '/', $package->name)) 
+						// {
+							// foreach ($package->classes as $importClass) 
+							// {
+								// $class->dependencies[$importClass->name] = $importClass->name;
+							// }
+						// }
+					// }
+				// }
+			// }
 		}
 	}	
 	
@@ -717,6 +708,35 @@ class As3ToJSPorter {
 	}
 	
 
+  public function rewriteClassNames() 
+  {  
+    $regExps = array();
+    $replaces = array();  
+    foreach ($this->struct->classes as $class) 
+    {    
+      $className = $class->name;
+      $regExps[] = '/(?<![[:alnum:]_$\.])(' . $className . ')(?![[:alnum:]_$])/';
+      $replaces[] = $this->namespace . '.' . $className;
+    }
+    
+		foreach ($this->struct->classes as $class) 
+		{
+			foreach ($class->functions as $function) 
+			{
+        $function->source = preg_replace($regExps, $replaces, $function->source);
+      }
+      
+      foreach ($class->properties as $property) 
+      {
+        if (!$property->isStatic && $property->value) 
+        {        
+          $property->value = preg_replace($regExps, $replaces, $property->value);
+        }
+      }	      
+    }
+  }
+  
+  
 	public function removeTypeCasts($source)
 	{
 		$regExp = '/(\s+as\s+[[:alnum:]_$]+)/';
@@ -762,6 +782,8 @@ class As3ToJSPorter {
 			}
 			
 		}
+    
+    $this->rewriteClassNames();
 	
 	}
 	
@@ -802,12 +824,12 @@ class As3ToJSPorter {
 
 		foreach ($this->struct->packages[$class->packageName]->classes as $siblingClass) 
 		{
-			if ($siblingClass->name != $class->name && !array_key_exists($siblingClass->name, $class->dependencies))
-				echo "\tvar " . $siblingClass->name . ' = ' . $this->namespace . '.' . $siblingClass->name . ";\r\n";
+			// if ($siblingClass->name != $class->name && !array_key_exists($siblingClass->name, $class->dependencies))
+				// echo "\tvar " . $siblingClass->name . ' = ' . $this->namespace . '.' . $siblingClass->name . ";\r\n";
 		}		
 		foreach ($class->dependencies as $dependencyName) 
 		{
-			echo "\tvar " . $dependencyName . ' = ' . $this->namespace . '.' . $dependencyName . ";\r\n";
+			// echo "\tvar " . $dependencyName . ' = ' . $this->namespace . '.' . $dependencyName . ";\r\n";
 		}
 		
 		echo "\r\n";
@@ -844,7 +866,7 @@ class As3ToJSPorter {
 		// Inheritance
 		
 		if ($class->extends) {
-			echo "\r\n\t". $this->namespace .".extend(" . $class->name . ", " . $class->extends->name . ");\r\n";
+			echo "\r\n\t". $this->namespace .".extend(" . $class->name . ", " . $this->namespace . "." . $class->extends->name . ");\r\n";
 		}
 
 		// Functions
@@ -952,14 +974,14 @@ class As3ToJSPorter {
     $classNames = array_keys($this->struct->classes);  
 
     foreach ($classNames as $className) {
-    
       $class = $this->struct->classes[$className];
+      
       $result[] = array(
         'key' => $className,
         'deps' => array_values($class->dependencies)      
       );
-    }
-    
+      
+    }    
     return $result;
   }
   
@@ -1027,6 +1049,7 @@ class As3ToJSPorter {
 			}
 		}
 
+    print_r($solvedItems);
 		return $solvedItems;
 	}
 
@@ -1043,6 +1066,8 @@ class As3ToJSPorter {
 		echo "\r\n" . htmlspecialchars('<script type="text/javascript" src="' . $file . '"></script>');
 		$combined .= $contents;
 
+    $dependencyTree = $this->getDependencyTree();
+    // DEPENDENCIES;
     $dependencyTree = $this->solveDependencies($this->getDependencyTree());
 
 		foreach ($dependencyTree as $dependency) 
